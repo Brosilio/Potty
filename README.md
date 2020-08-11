@@ -1,2 +1,2 @@
-# CoreCereal
-.NET Core serial terminal
+# Coral
+.NET Core serial (RS232) console
