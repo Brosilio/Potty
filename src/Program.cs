@@ -3,151 +3,159 @@ using System.Collections.Generic;
 using System.IO.Ports;
 using System.Threading;
 using System.Text;
+using System.Threading.Tasks;
+using System.IO;
 
-namespace Coral
+namespace Potty
 {
-    class Program
+    class Program : CliProgramBase
     {
-        static void Main(string[] rawArgs)
+        [CliArg(HelpText = "Show help text")]
+        public bool Help = false;
+
+        [CliArg(HelpText = "List available serial ports then quit")]
+        public bool List = false;
+
+        [CliArg(HelpText = "The port to open")]
+        public string Port = null;
+
+        [CliArg(HelpText = "The baud rate to use. Default: 9600")]
+        public int Baud = 9600;
+
+        [CliArg(HelpText = "The number of data bits. Default: 8")]
+        public int Data = 8;
+
+        [CliArg(HelpText = "The parity bits to use. Default: None")]
+        public Parity Parity = Parity.None;
+
+        [CliArg(HelpText = "The number of stop bits to use. Default: One")]
+        public StopBits StopBits = StopBits.One;
+
+        [CliArg(HelpText = "Enable ANSI control sequence support. Default: false")]
+        public bool Ansi = false;
+
+        [CliArg(HelpText = "Whether or not to echo keypresses locally. Default: false")]
+        public bool Echo = false;
+
+        [CliArg(HelpText = "Whether or not to emit CR and LF instead of just CR for the RETURN key. Default: false")]
+        public bool Crlf = false;
+
+        public Program(string[] args) : base(args)
         {
-            Dictionary<string, string> argDict = new Dictionary<string, string>();
-            foreach (string str in rawArgs)
-            {
-                if (!string.IsNullOrWhiteSpace(str) && str.Contains('-'))
-                {
-                    string arg = str.TrimStart('-');
-                    int end = arg.IndexOf("=");
-
-                    if (end == -1)
-                        argDict.Add(arg, null);
-                    else
-                        argDict.Add(arg.Substring(0, arg.IndexOf('=')), arg.Substring(arg.IndexOf('=') + 1));
-                }
-            }
-
-            if (argDict.Count == 0 || argDict.ContainsKey("help") || argDict.ContainsKey("usage"))
-            {
-                PrintUsage();
-                return;
-            }
-
-            if (argDict.ContainsKey("list"))
-            {
-                int index = 0;
-                foreach (string s in SerialPort.GetPortNames())
-                {
-                    Console.WriteLine($"{index}: {s}");
-                    index++;
-                }
-
-                return;
-            }
-
-            if (!argDict.ContainsKey("port"))
-            {
-                Console.WriteLine("No port specified. Use --help or --usage.");
-                return;
-            }
-
-
-            int baudRate = 9600;
-            StopBits stop = StopBits.One; // TODO
-            int data = 8;
-            Parity parity = Parity.None; // TODO
-
-            if (argDict.ContainsKey("baud"))
-            {
-                if (!int.TryParse(argDict["baud"], out baudRate))
-                {
-                    Console.WriteLine("Invalid value specified for --baud");
-                    return;
-                }
-            }
-
-            if (argDict.ContainsKey("data"))
-            {
-                if (!int.TryParse(argDict["data"], out data))
-                {
-                    Console.WriteLine("Invalid value specified for --data");
-                    return;
-                }
-
-                if (data < 5 || data > 8)
-                {
-                    Console.WriteLine("Invalid value specified for --data. Must be >=5 and <=8");
-                    return;
-                }
-            }
-
-            try
-            {
-                SerialPort sp = new SerialPort(argDict["port"], baudRate, parity, data, stop);
-                try
-                {
-                    sp.Open();
-                    if (!sp.IsOpen)
-                    {
-                        Console.WriteLine($"Could not open serial port ({argDict["port"]}).");
-                        return;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error: {ex.Message}");
-                    Console.WriteLine($"Could not open serial port ({argDict["port"]}).");
-                    return;
-                }
-
-                bool fuckOff = false;
-                new Thread(() =>
-                {
-                    byte[] b = new byte[8192]; // TODO: acknowledge presence of --buffer argument
-                    int read = 0;
-                    do
-                    {
-                        sp.Read(b, 0, b.Length);
-                        if (read == 0)
-                        {
-                            Console.WriteLine($"Connection to {argDict["port"]} closed.");
-                            fuckOff = true;
-                            Environment.Exit(1);
-                            return;
-                        }
-
-                        // TODO: acknowledge presence of --log argument
-                        Console.Write(Encoding.ASCII.GetString(b, 0, read));
-                    } while (read != 0);
-                }).Start();
-
-                while (!fuckOff)
-                {
-                    string r = Console.ReadLine();
-                    sp.WriteLine(r);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error: {ex.Message}");
-                Console.WriteLine($"Error on ({argDict["port"]}).");
-            }
-
-            Environment.Exit(0);
         }
 
-        private static void PrintUsage()
+        static int Main(string[] args)
         {
-            Console.WriteLine("Coral - Usage");
-            Console.WriteLine("    Coral --port=<port> --baud=<baud rate> --stop=<stop bits>");
-            Console.WriteLine();
-            Console.WriteLine("Options:");
-            Console.WriteLine("    --list: list available serial ports");
-            Console.WriteLine("    --port: the name or index of the serial port to connect to");
-            Console.WriteLine("    --baud: the baud rate to use (default 9600)");
-            Console.WriteLine("    --data: the number of data bits [5|6|7|8] (default 8)");
-            Console.WriteLine("    --stop: the number of stop bits [0|1|1.5|2] (default 0)");
-            Console.WriteLine("    --parity: the parity (default none)");
-            Console.WriteLine("    --buffer: the size of I/O buffers, in bytes (default 8192)");
-            Console.WriteLine("    --log: a filename to log output to");
+            if (args.Length == 0)
+            {
+                Console.WriteLine("No arguments provided, use \"potty help\" for help");
+                return 1;
+            }
+
+            // run
+            Program p = new Program(args);
+            if (p.ValidateCliArgs())
+                p.CliMain();
+
+            return 0;
+        }
+
+        protected override void CliMain()
+        {
+            // enable ANSI on windows if requested
+            if (Ansi && Environment.OSVersion.Platform == PlatformID.Win32NT)
+            {
+                if (!Utility.EnableAnsiOnWindows())
+                {
+                    Console.WriteLine("<POTTY>: INCOMING ANSI SUPPORT NOT AVAILABLE");
+                }
+            }
+
+            // disable cursor
+            Console.CursorVisible = false;
+
+            // open serial port and do the stuff
+            SerialPort sp = new SerialPort(Port, Baud, Parity, Data, StopBits);
+            sp.Open();
+
+            // reenable cursor
+            Console.CursorVisible = true;
+
+            // start reading and copying to stdout
+            Task rTask = Task.Run(() =>
+            {
+                byte[] buffer = new byte[8192];
+                int read = -1;
+                Stream stdout = Console.OpenStandardOutput();
+
+                while (read != 0 && sp.IsOpen)
+                {
+                    read = sp.Read(buffer, 0, buffer.Length);
+                    stdout.Write(buffer, 0, read);
+                    stdout.Flush();
+                }
+            });
+
+            // read keys or characters from stdin
+            Task wTask = Task.Run(() =>
+            {
+                char[] buffer = new char[16];
+                ConsoleKeyInfo cki;
+                int len;
+
+                while (sp.IsOpen)
+                {
+                    len = 1;
+                    cki = Console.ReadKey(true);
+
+                    // set the character to send
+                    buffer[0] = cki.KeyChar;
+
+                    // overwrite the character with ansi sequence, if any
+                    if (Ansi)
+                        len = AnsiUtility.GetAnsiSequence(buffer, cki);
+
+                    // append \n if requested
+                    if (Crlf && cki.Key == ConsoleKey.Enter)
+                        buffer[len++] = '\n';
+
+                    // write out
+                    sp.Write(buffer, 0, len);
+
+                    // echo if requested
+                    if (Echo)
+                        Console.Write(buffer, 0, len);
+                }
+            });
+
+            // go until something fails
+            Task.WaitAny(rTask, wTask);
+        }
+
+        protected override bool ValidateCliArgs()
+        {
+            // print help and quit
+            if (Help)
+            {
+                Console.WriteLine("Usage: potty arg=val ...\n");
+                Console.WriteLine(GetCliUsageString());
+                return false;
+            }
+
+            // list available serial ports and quit
+            if (List)
+            {
+                foreach (string name in SerialPort.GetPortNames())
+                    Console.WriteLine(name);
+
+                return false;
+            }
+
+            // ensure data is within valid range
+            if (Data < 5 || Data > 8)
+                throw new ArgumentOutOfRangeException(nameof(Data), "Data must be 5, 6, 7, or 8");
+
+            return true;
         }
     }
 }
