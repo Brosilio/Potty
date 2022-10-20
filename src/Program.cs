@@ -72,14 +72,14 @@ namespace Potty
             }
 
             // disable cursor
-            Console.CursorVisible = false;
+            SafeConsole.CursorVisible = false;
 
             // open serial port and do the stuff
             SerialPort sp = new SerialPort(Port, Baud, Parity, Data, StopBits);
             sp.Open();
 
             // reenable cursor
-            Console.CursorVisible = true;
+            SafeConsole.CursorVisible = true;
 
             // start reading and copying to stdout
             Task rTask = Task.Run(() =>
@@ -100,24 +100,16 @@ namespace Potty
             Task wTask = Task.Run(() =>
             {
                 char[] buffer = new char[16];
-                ConsoleKeyInfo cki;
                 int len;
 
                 while (sp.IsOpen)
                 {
-                    len = 1;
-                    cki = Console.ReadKey(true);
+                    // read next pressed keys OR fill buffer with stdin
+                    len = SafeConsole.ReadNext(buffer, Ansi, Crlf);
 
-                    // set the character to send
-                    buffer[0] = cki.KeyChar;
-
-                    // overwrite the character with ansi sequence, if any
-                    if (Ansi)
-                        len = AnsiUtility.GetAnsiSequence(buffer, cki);
-
-                    // append \n if requested
-                    if (Crlf && cki.Key == ConsoleKey.Enter)
-                        buffer[len++] = '\n';
+                    // no more input available, exit
+                    if (len <= 0)
+                        break;
 
                     // write out
                     sp.Write(buffer, 0, len);
